@@ -6,7 +6,7 @@ cloud:
   config:
     server:
       git:
-        uri: https://github.com/FacuOlivieri/RepoConfigServer.git
+        uri: https://github.com/FacuOlivieri/repo-ej-int-MS.git
         searchPaths: config-data
         username: ${GIT_USER}
         password: ${GIT_PASSWORD}

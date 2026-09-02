@@ -6,6 +6,7 @@ import com.todocodeacademyEIMS.Producto.mapper.Mapper;
 import com.todocodeacademyEIMS.Producto.model.Product;
 import com.todocodeacademyEIMS.Producto.repository.IProductRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,6 +16,9 @@ public class ProductService implements IProductService {
 
     @Autowired
     private IProductRepository productRepository;
+
+    @Value("${server.port}")
+    private int serverPort;
 
     @Override
     public List<ProductDTO> findAll() {
@@ -42,6 +46,7 @@ public class ProductService implements IProductService {
     public ProductDTO save(ProductDTO productDTO) {
         Product product = Mapper.mapFromDTO(productDTO);
         product.setIdProduct(null);
+        System.out.println("Producto creado con el puerto " + serverPort);
         return Mapper.mapToDTO(productRepository.save(product));
     }
 

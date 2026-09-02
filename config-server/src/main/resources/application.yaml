@@ -1,12 +1,14 @@
+server:
+  port: 8888
+
 spring:
   application:
-    name: config-server
-
-cloud:
-  config:
-    server:
-      git:
-        uri: https://github.com/FacuOlivieri/repo-ej-int-MS.git
-        searchPaths: config-data
-        username: ${GIT_USER}
-        password: ${GIT_PASSWORD}
+    name: config-data
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/FacuOlivieri/repo-ej-int-MS.git
+          search-paths: config-data
+          username: ${GIT_USER}
+          password: ${GIT_PASSWORD}

@@ -24,12 +24,12 @@ public class ProductController {
     @Autowired
     private IProductService productService;
 
-    @GetMapping
+    @GetMapping("/find/all")
     public ResponseEntity<List<ProductDTO>> findAll() {
         return ResponseEntity.ok(productService.findAll());
     }
 
-    @GetMapping("/{idProduct}")
+    @GetMapping("/find/{idProduct}")
     public ResponseEntity<ProductDTO> findById(@PathVariable Long idProduct) {
         return ResponseEntity.ok(productService.findById(idProduct));
     }
@@ -39,18 +39,18 @@ public class ProductController {
         return ResponseEntity.ok(productService.findByName(name));
     }
 
-    @PostMapping
+    @PostMapping("/save")
     public ResponseEntity<ProductDTO> save(@RequestBody ProductDTO productDTO) {
         return ResponseEntity.status(HttpStatus.CREATED).body(productService.save(productDTO));
     }
 
-    @PutMapping("/{idProduct}")
+    @PutMapping("/update/{idProduct}")
     public ResponseEntity<ProductDTO> update(@PathVariable Long idProduct,
                                              @RequestBody ProductDTO productDTO) {
         return ResponseEntity.ok(productService.update(idProduct, productDTO));
     }
 
-    @DeleteMapping("/{idProduct}")
+    @DeleteMapping("/delete/{idProduct}")
     public ResponseEntity<Void> deleteById(@PathVariable Long idProduct) {
         productService.deleteById(idProduct);
         return ResponseEntity.noContent().build();

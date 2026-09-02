@@ -9,7 +9,7 @@ import lombok.*;
 @Builder
 public class ProductItemDTO {
 
-    private int idProductLine;
+    private Long idProductLine;
     private ProductDTO product;
     private int quantity;
     private double subtotal;

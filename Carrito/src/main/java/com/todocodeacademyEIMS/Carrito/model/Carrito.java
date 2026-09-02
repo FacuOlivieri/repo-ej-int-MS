@@ -1,19 +1,28 @@
 package com.todocodeacademyEIMS.Carrito.model;
 
 
-import com.todocodeacademyEIMS.Carrito.dto.ProductItemDTO;
+import jakarta.persistence.*;
 import lombok.*;
 
 import java.util.List;
 
+@Entity
 @Getter @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@Table(name = "Carrito")
 public class Carrito {
-    
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long idCarrito;
-    private List<ProductItemDTO> productList;
+
+    // Items are saved and deleted through the cart (cascade + orphanRemoval),
+    // so no separate ProductItem repository is needed.
+    @OneToMany(mappedBy = "carrito", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ProductItem> productList;
+
     private double totalPrice;
 
 }

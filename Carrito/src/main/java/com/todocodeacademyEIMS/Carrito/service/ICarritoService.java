@@ -1,5 +1,6 @@
 package com.todocodeacademyEIMS.Carrito.service;
 
+import com.todocodeacademyEIMS.Carrito.dto.AddProductRequestDTO;
 import com.todocodeacademyEIMS.Carrito.dto.CarritoDTO;
 
 import java.util.List;
@@ -15,4 +16,7 @@ public interface ICarritoService {
     CarritoDTO update(Long idCarrito, CarritoDTO carritoDTO);
 
     void deleteById(Long idCarrito);
+
+
+    CarritoDTO addProduct(Long idCarrito, AddProductRequestDTO request);
 }

@@ -37,7 +37,8 @@ public class ProductService implements IProductService {
 
     @Override
     public ProductDTO findByName(String name) {
-        Product product = productRepository.findByName(name)
+        String incomingName = name.trim().toLowerCase();
+        Product product = productRepository.findByName(name.trim().toLowerCase())
                 .orElseThrow(() -> new ProductNotFoundException(name));
         return Mapper.mapToDTO(product);
     }

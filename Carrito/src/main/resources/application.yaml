@@ -1,6 +1,6 @@
 spring:
   application:
-    name: Carrito
+    name: carrito-service
 
   datasource:
     url: jdbc:mysql://localhost:3306/carritodb?createDatabaseIfNotExist=true&serverTimezone=UTC

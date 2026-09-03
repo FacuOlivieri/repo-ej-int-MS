@@ -35,8 +35,8 @@ public class ProductController {
     }
 
     @GetMapping("/search")
-    public ResponseEntity<ProductDTO> findByName(@RequestParam String name) {
-        return ResponseEntity.ok(productService.findByName(name));
+    public ResponseEntity<ProductDTO> findByName(@RequestParam String productName) {
+        return ResponseEntity.ok(productService.findByName(productName));
     }
 
     @PostMapping("/save")

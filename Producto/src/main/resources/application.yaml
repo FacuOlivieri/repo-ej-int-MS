@@ -1,6 +1,6 @@
 spring:
   application:
-    name: Producto
+    name: producto-service
 
   datasource:
     url: jdbc:mysql://localhost:3306/productodb?createDatabaseIfNotExist=true&serverTimezone=UTC
@@ -24,3 +24,5 @@ eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka
+
+

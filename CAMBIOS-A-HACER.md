@@ -13,7 +13,7 @@ Borrar los ítems a medida que se completan.
 | `eureka-server` | 8761 | listo |
 | `Producto` (`producto-service`) | 8083 | CRUD completo + `/products/search?productName=` |
 | `Carrito` (`carrito-service`) | 8082 | CRUD completo + `addProduct` vía Feign a Producto |
-| `ventas-service` (carpeta `ventas-service/`) | 8084 | config lista (B1 ✅); falta todo el dominio |
+| `ventas-service` (carpeta `ventas-service/`) | 8084 | CRUD + `confirmarVenta` vía Feign a Carrito (B1–B7 ✅) — **probado end-to-end por Postman (2026-09-07)** |
 | API Gateway | 8080 | **no existe** |
 
 > **Para compilar:** los poms piden Java 25, pero el `java` del PATH es el 21. Hay que
@@ -24,8 +24,12 @@ Borrar los ítems a medida que se completan.
 Decisiones ya tomadas para Ventas:
 
 - La venta guarda un **snapshot** de las líneas del carrito (queda inmutable).
+- **El precio final viene calculado desde `carrito-service`**: subtotales y total se copian
+  tal cual. Carrito es el dueño de la lógica de precios; Ventas no la duplica.
 - **No** se maneja stock: `Product` sigue siendo `id / name / brand / unitPrice`.
 - Después de vender, **el carrito no se toca**: `ventas-service` solo lo lee.
+- La venta guarda **nombre y marca** de cada producto (snapshot), resueltos por
+  `carrito-service` al leer el carrito (FEIGN SEAM cerrado — ver B10).
 - El Gateway lo implementa Facu por su cuenta (ver bloque C).
 
 ---
@@ -135,22 +139,19 @@ Flujo objetivo:
 ```
 POST /ventas/save { "idCarrito": 1 }
    -> ventas-service pide GET /carritos/find/1 a carrito-service (Feign + Eureka)
-   -> copia las líneas del carrito a la venta (snapshot)
-   -> recalcula el total del lado del servidor
+   -> copia las líneas del carrito a la venta (snapshot), importes incluidos
    -> guarda la Venta en ventasdb
    -> devuelve 201 con la VentaDTO
 ```
 
 ## B1. Configuración base
 
-**Estado:** ✅ HECHO (falta solo el arranque real contra MySQL + Eureka)
+**Estado:** ✅ HECHO y verificado
 
 La carpeta del módulo se renombró `Ventas/` -> `ventas-service/`. El `application.yaml`
 quedó completo (puerto 8084, `ventasdb`, Eureka) y `VentasApplication` ya tiene
-`@EnableDiscoveryClient` y `@EnableFeignClients`. Compila.
-
-Pendiente de verificación manual: levantar `eureka-server` + MySQL y confirmar que
-`ventas-service` arranca y aparece registrado en `http://localhost:8761`.
+`@EnableDiscoveryClient` y `@EnableFeignClients`. Arranca, crea la base y se registra
+en Eureka.
 
 <details>
 <summary>Config aplicada</summary>
@@ -196,7 +197,7 @@ Y en `VentasApplication`: `@EnableDiscoveryClient` y `@EnableFeignClients`
 
 ## B2. Modelo (`model/`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 ```java
 // Venta
@@ -212,6 +213,8 @@ double total;
 // VentaItem  -> snapshot de una línea del carrito
 Long idVentaLine;          // @Id @GeneratedValue IDENTITY
 Long idProduct;            // id del producto en productodb (sin relación JPA)
+String name;               // snapshot del nombre al momento de la venta (B10)
+String brand;              // snapshot de la marca al momento de la venta (B10)
 int quantity;
 double unitPrice;          // precio congelado al momento de la venta
 double subtotal;
@@ -224,12 +227,12 @@ nunca como relación JPA.
 
 ## B3. DTOs (`dto/`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 Propios de Ventas:
 
 - `VentaDTO` — `idVenta`, `idCarrito`, `fechaVenta`, `List<VentaItemDTO> items`, `total`
-- `VentaItemDTO` — `idVentaLine`, `idProduct`, `quantity`, `unitPrice`, `subtotal`
+- `VentaItemDTO` — `idVentaLine`, `idProduct`, `name`, `brand`, `quantity`, `unitPrice`, `subtotal`
 - `CreateVentaRequestDTO` — `idCarrito`
 
 Copias para deserializar lo que responde `carrito-service` (Feign necesita las clases del
@@ -239,14 +242,13 @@ lado del cliente; se duplican a propósito, cada microservicio es autónomo):
 - `ProductItemDTO` — `idProductLine`, `ProductDTO product`, `quantity`, `subtotal`
 - `ProductDTO` — `idProduct`, `name`, `brand`, `unitPrice`
 
-> Recordatorio: el `Mapper` de Carrito hoy devuelve `name` y `brand` en **null**
-> (comentario "FEIGN SEAM"). A Ventas no le molesta porque solo usa `idProduct`,
-> `unitPrice`, `quantity` y `subtotal`. Si en algún momento se quiere el nombre del
-> producto dentro de la venta, hay que completar ese mapper primero.
+> ~~Recordatorio: el `Mapper` de Carrito devuelve `name` y `brand` en **null**.~~
+> ✅ Cerrado en B10: `carrito-service` ahora resuelve `name`/`brand` contra
+> `producto-service` al leer el carrito, y Ventas los congela en la venta.
 
 ## B4. Repositorios (`repository/`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 - `IVentaRepository extends JpaRepository<Venta, Long>`
   (los `VentaItem` se persisten y borran por cascada, igual que `ProductItem` en Carrito
@@ -263,7 +265,7 @@ lado del cliente; se duplican a propósito, cada microservicio es autónomo):
 
 ## B5. Mapper (`mapper/Mapper.java`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 - `Venta -> VentaDTO` y `VentaItem -> VentaItemDTO`
 - `CarritoDTO -> List<VentaItem>` (la conversión clave: de la respuesta de Carrito a las
@@ -272,7 +274,7 @@ lado del cliente; se duplican a propósito, cada microservicio es autónomo):
 
 ## B6. Service (`service/IVentaService` + `VentaService`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 Métodos:
 
@@ -286,8 +288,9 @@ Lógica de `confirmarVenta`:
 1. Traer el carrito por Feign. Si tira `FeignException.NotFound` -> 404 propio.
 2. Si el carrito viene sin líneas -> 400 "No se puede vender un carrito vacío".
 3. Copiar cada línea a un `VentaItem` (snapshot de `unitPrice`).
-4. **Recalcular subtotales y total del lado del servidor**, igual que hace
-   `CarritoService.recalculate`. Nunca confiar en el `totalPrice` que llega por HTTP.
+4. **Copiar los importes tal como vienen del carrito** (`subtotal` de cada línea y
+   `totalPrice`). Carrito ya los calcula del lado del servidor en su `recalculate`, así que
+   Ventas no repite esa lógica: solo la congela.
 5. `fechaVenta = LocalDateTime.now()`.
 6. Guardar y devolver la `VentaDTO`. **El carrito no se modifica ni se borra** (ver B9.1):
    la única llamada saliente del método es el `GET` del paso 1.
@@ -297,7 +300,7 @@ lecturas — mismo criterio que `CarritoService`.
 
 ## B7. Controller (`controller/VentaController.java`)
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
 
 `@RequestMapping("/ventas")`, respetando el estilo de los otros dos controllers:
 
@@ -343,6 +346,41 @@ con "carrito-service caído".
 3. ~~**¿Hace falta un campo `cliente`?**~~ **DECIDIDO: no va.** La consigna no lo pide y no
    hay microservicio de usuarios. `Venta` queda con `idVenta`, `idCarrito`, `fechaVenta`,
    `items` y `total`, nada más.
+
+## B10. Nombre y marca del producto en la venta — FEIGN SEAM cerrado
+
+**Estado:** ✅ HECHO (2026-09-07)
+
+`carritodb` no guarda `name` ni `brand` (por diseño: `ProductItem` solo tiene `idProduct` +
+snapshot de `unitPrice`), así que la respuesta de `carrito-service` los devolvía en `null`.
+Se eligió **cerrar el seam en `carrito-service`** (opción B, arquitectura más limpia) en vez
+de que Ventas enriquezca por su cuenta.
+
+`carrito-service`:
+
+- `ProductoAPI.findProductById(Long)` -> `GET /products/find/{idProduct}` (además del
+  `findProductByName` que ya estaba).
+- `CarritoService.enrichProductData(CarritoDTO)` — helper privado que, por cada línea,
+  consulta `producto-service` y completa `name`/`brand` **sobre el mismo `ProductDTO`**
+  (el `unitPrice` snapshot no se toca). Se llama en `findAll`, `findById`, `save`,
+  `update`, `addProduct`. `try/catch FeignException.NotFound` por línea: si el producto
+  fue borrado, esa línea queda sin nombre y el carrito responde igual.
+- El comentario "FEIGN SEAM" del `Mapper` quedó actualizado (el mapper sigue puro;
+  el seam se cierra en el service).
+
+`ventas-service`:
+
+- `VentaItem` y `VentaItemDTO` sumaron `name` y `brand` (se congelan al vender, snapshot).
+- `Mapper.mapItemsFromCarrito` copia `name`/`brand` desde la respuesta del carrito;
+  `mapToDTO(VentaItem)` los expone.
+
+**Deuda que deja:** `GET /carritos/find/all` ahora hace N llamadas Feign (una por línea).
+`producto-service` no tiene endpoint bulk-by-ids — queda como TODO, y el Circuit Breaker
+de A2 debería envolver también `findProductById`.
+
+> Nota: sigue habiendo un comentario "FEIGN SEAM" viejo en `CarritoService.recalculate()`
+> que habla de validar el **precio** contra Producto. Es otra discusión (¿confiar en el
+> `unitPrice` del request?), no se tocó.
 
 ---
 
@@ -392,13 +430,40 @@ A tener en cuenta cuando se arme:
 # Orden sugerido
 
 1. ~~A1 — el try/catch del 404 en Carrito.~~ ✅ hecho.
-2. ~~B1 — config de Ventas.~~ ✅ hecho (falta el arranque real contra MySQL + Eureka).
-3. B2 -> B3 -> B4 -> B5 -> B6 -> B7: Ventas de punta a punta.
+2. ~~B1 — config de Ventas.~~ ✅ hecho y verificado.
+3. ~~B2 -> B3 -> B4 -> B5 -> B6 -> B7: Ventas de punta a punta.~~ ✅ hecho, compila y
+   **probado por Postman (2026-09-07)**.
+   ~~B10 — nombre/marca del producto en la venta (FEIGN SEAM).~~ ✅ hecho.
 4. C — gateway.
 5. **A2 + B8 — circuit breaker en los dos servicios, de una sola vez.** Postergados a
    propósito: se hacen juntos cuando las llamadas Feign ya estén andando y probadas, así
    se agrega resiliencia sobre algo que funciona en vez de debuggear las dos cosas a la vez.
 6. D — limpiezas, antes de la entrega.
 
-Decisiones que quedan abiertas y no bloquean nada: B9.2 (bloquear venta duplicada del mismo
-carrito) se resuelve al escribir B6.
+Decisiones que quedan abiertas: **B9.2** (bloquear venta duplicada del mismo carrito).
+Se implementó SIN el bloqueo, siguiendo el criterio de alcance del resto del ejercicio.
+Si se quiere agregar: `boolean existsByIdCarrito(Long)` en `IVentaRepository` + un 409 al
+principio de `confirmarVenta`.
+
+---
+
+# Prueba de Ventas (de punta a punta) — ✅ HECHA por Postman (2026-09-07)
+
+Se corrió con `eureka-server`, MySQL, `producto-service`, `carrito-service` y
+`ventas-service` arriba. Anduvo todo OK, incluido el nombre/marca en las líneas de la venta
+(B10). Guion usado, por si hay que repetirlo:
+
+1. `POST http://localhost:8083/products/save` — crear un producto.
+2. `POST http://localhost:8082/carritos/save` con `{"productList": [], "totalPrice": 0}` —
+   crear un carrito vacío.
+3. `PUT http://localhost:8082/carritos/addProduct/1` con
+   `{"productName": "...", "quantity": 2}` — cargarle el producto.
+4. `POST http://localhost:8084/ventas/save` con `{"idCarrito": 1}` — **201** con las líneas
+   copiadas y el total calculado.
+5. `GET http://localhost:8082/carritos/find/1` — el carrito sigue intacto (decisión B9.1).
+
+Casos de error a verificar:
+
+- `POST /ventas/save` con `{"idCarrito": 9999}` -> **404**, no 500 (es el try/catch de B6).
+- `POST /ventas/save` sobre un carrito sin líneas -> **400**.
+- `PUT /carritos/addProduct/1` con un `productName` inexistente -> **404**, no 500 (A1).

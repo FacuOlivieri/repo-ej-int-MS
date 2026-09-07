@@ -3,6 +3,7 @@ package com.todocodeacademyEIMS.Carrito.service;
 import com.todocodeacademyEIMS.Carrito.dto.AddProductRequestDTO;
 import com.todocodeacademyEIMS.Carrito.dto.CarritoDTO;
 import com.todocodeacademyEIMS.Carrito.dto.ProductDTO;
+import com.todocodeacademyEIMS.Carrito.dto.ProductItemDTO;
 import com.todocodeacademyEIMS.Carrito.mapper.Mapper;
 import com.todocodeacademyEIMS.Carrito.model.Carrito;
 import com.todocodeacademyEIMS.Carrito.model.ProductItem;
@@ -32,13 +33,14 @@ public class CarritoService implements ICarritoService {
         return carritoRepository.findAll()
                 .stream()
                 .map(Mapper::mapToDTO)
+                .map(this::enrichProductData)
                 .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public CarritoDTO findById(Long idCarrito) {
-        return Mapper.mapToDTO(findEntityById(idCarrito));
+        return enrichProductData(Mapper.mapToDTO(findEntityById(idCarrito)));
     }
 
     @Override
@@ -50,7 +52,7 @@ public class CarritoService implements ICarritoService {
 
         recalculate(carrito);
 
-        return Mapper.mapToDTO(carritoRepository.save(carrito));
+        return enrichProductData(Mapper.mapToDTO(carritoRepository.save(carrito)));
     }
 
     @Override
@@ -70,7 +72,7 @@ public class CarritoService implements ICarritoService {
 
         recalculate(carrito);
 
-        return Mapper.mapToDTO(carritoRepository.save(carrito));
+        return enrichProductData(Mapper.mapToDTO(carritoRepository.save(carrito)));
     }
 
     @Override
@@ -108,7 +110,49 @@ public class CarritoService implements ICarritoService {
         }
 
         recalculate(carrito);
-        return Mapper.mapToDTO(carritoRepository.save(carrito));
+        return enrichProductData(Mapper.mapToDTO(carritoRepository.save(carrito)));
+    }
+
+    /**
+     * Closes the FEIGN SEAM for the cart read path.
+     *
+     * By design carritodb never stores product name or brand: a {@link ProductItem}
+     * only keeps idProduct plus the unitPrice snapshot. Those descriptive fields are
+     * resolved here, on read, against producto-service so the response carries them
+     * without duplicating product data in this service's database.
+     *
+     * For every line the existing {@link ProductDTO} instance is mutated in place:
+     * only name and brand are filled, the unitPrice snapshot stays exactly as carrito
+     * stored it. A missing product (deleted in producto-service) is tolerated per line
+     * so one gap does not break the whole cart response.
+     *
+     * TODO: producto-service has no bulk-by-ids endpoint, so findAll() does N per-line
+     * calls. Add a bulk endpoint later, and the Circuit Breaker from task A2 should wrap
+     * findProductById too.
+     */
+    private CarritoDTO enrichProductData(CarritoDTO carritoDTO) {
+        if (carritoDTO == null || carritoDTO.getProductList() == null) {
+            return carritoDTO;
+        }
+
+        for (ProductItemDTO productItemDTO : carritoDTO.getProductList()) {
+            if (productItemDTO == null) {
+                continue;
+            }
+            ProductDTO product = productItemDTO.getProduct();
+            if (product == null || product.getIdProduct() == null) {
+                continue;
+            }
+            try {
+                ProductDTO resolved = productoAPI.findProductById(product.getIdProduct());
+                product.setName(resolved.getName());
+                product.setBrand(resolved.getBrand());
+            } catch (FeignException.NotFound e) {
+                // Product deleted in producto-service; leave name/brand null for this line, continue.
+            }
+        }
+
+        return carritoDTO;
     }
 
     /**

@@ -25,8 +25,9 @@ public class Mapper {
 
     public static ProductItemDTO mapToDTO(ProductItem productItem) {
         // Only local data is available here: the product id and the stored price snapshot.
-        // FEIGN SEAM: name and brand stay null until the Producto microservice is queried
-        // by idProduct and its response is used to complete this ProductDTO.
+        // FEIGN SEAM: closed in CarritoService.enrichProductData, which fills name and brand
+        // on read by querying the Producto microservice by idProduct. This mapper still only
+        // sets idProduct + unitPrice from local data.
         ProductDTO product = ProductDTO.builder()
                 .idProduct(productItem.getIdProduct())
                 .unitPrice(productItem.getUnitPrice())

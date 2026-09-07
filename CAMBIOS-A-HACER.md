@@ -13,7 +13,7 @@ Borrar los ítems a medida que se completan.
 | `eureka-server` | 8761 | listo |
 | `Producto` (`producto-service`) | 8083 | CRUD completo + `/products/search?productName=` |
 | `Carrito` (`carrito-service`) | 8082 | CRUD completo + `addProduct` vía Feign a Producto |
-| `Ventas` (`ventas-service`) | 8084 (a definir) | **esqueleto vacío**: solo `VentasApplication` y un `application.yaml` con el nombre |
+| `ventas-service` (carpeta `ventas-service/`) | 8084 | config lista (B1 ✅); falta todo el dominio |
 | API Gateway | 8080 | **no existe** |
 
 > **Para compilar:** los poms piden Java 25, pero el `java` del PATH es el 21. Hay que
@@ -127,7 +127,7 @@ spring:
 
 # BLOQUE B — Microservicio Ventas (el grueso del trabajo)
 
-`Ventas/pom.xml` **ya tiene todas las dependencias necesarias** (webmvc, jpa, mysql, lombok,
+`ventas-service/pom.xml` **ya tiene todas las dependencias necesarias** (webmvc, jpa, mysql, lombok,
 eureka-client, openfeign, loadbalancer, resilience4j, actuator). No hay que tocar el pom.
 
 Flujo objetivo:
@@ -143,10 +143,19 @@ POST /ventas/save { "idCarrito": 1 }
 
 ## B1. Configuración base
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO (falta solo el arranque real contra MySQL + Eureka)
 
-`Ventas/src/main/resources/application.yaml` — hoy solo tiene el `spring.application.name`.
-Completar siguiendo el molde de Carrito:
+La carpeta del módulo se renombró `Ventas/` -> `ventas-service/`. El `application.yaml`
+quedó completo (puerto 8084, `ventasdb`, Eureka) y `VentasApplication` ya tiene
+`@EnableDiscoveryClient` y `@EnableFeignClients`. Compila.
+
+Pendiente de verificación manual: levantar `eureka-server` + MySQL y confirmar que
+`ventas-service` arranca y aparece registrado en `http://localhost:8761`.
+
+<details>
+<summary>Config aplicada</summary>
+
+Molde de Carrito:
 
 ```yaml
 spring:
@@ -176,8 +185,14 @@ eureka:
       defaultZone: http://localhost:8761/eureka
 ```
 
-Y en `VentasApplication`: agregar `@EnableDiscoveryClient` y `@EnableFeignClients`
+Y en `VentasApplication`: `@EnableDiscoveryClient` y `@EnableFeignClients`
 (igual que `CarritoApplication`).
+
+</details>
+
+> Nota del rename: `ventas-service/pom.xml` sigue con `<artifactId>Ventas</artifactId>`.
+> No afecta a nada (el nombre en Eureka sale de `spring.application.name`), pero si querés
+> consistencia con la carpeta, ese es el lugar.
 
 ## B2. Modelo (`model/`)
 
@@ -377,8 +392,7 @@ A tener en cuenta cuando se arme:
 # Orden sugerido
 
 1. ~~A1 — el try/catch del 404 en Carrito.~~ ✅ hecho.
-2. B1 — config de Ventas; verificar que levanta y se registra en Eureka antes de escribir
-   una sola clase de dominio.
+2. ~~B1 — config de Ventas.~~ ✅ hecho (falta el arranque real contra MySQL + Eureka).
 3. B2 -> B3 -> B4 -> B5 -> B6 -> B7: Ventas de punta a punta.
 4. C — gateway.
 5. **A2 + B8 — circuit breaker en los dos servicios, de una sola vez.** Postergados a

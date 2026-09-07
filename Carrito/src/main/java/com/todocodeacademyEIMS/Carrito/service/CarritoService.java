@@ -8,13 +8,11 @@ import com.todocodeacademyEIMS.Carrito.model.Carrito;
 import com.todocodeacademyEIMS.Carrito.model.ProductItem;
 import com.todocodeacademyEIMS.Carrito.repository.ICarritoRepository;
 import com.todocodeacademyEIMS.Carrito.repository.ProductoAPI;
+import feign.FeignException;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -88,7 +86,6 @@ public class CarritoService implements ICarritoService {
     @Transactional
     public CarritoDTO addProduct(Long idCarrito, AddProductRequestDTO request) {
 
-        // TODO: envolver esta llamada con un Circuit Breaker (Resilience4j).
         int quantity = request.getQuantity();
         if (quantity <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -97,14 +94,7 @@ public class CarritoService implements ICarritoService {
 
         Carrito carrito = findEntityById(idCarrito);
 
-
-
-        // TODO: envolver esta llamada con un Circuit Breaker (Resilience4j).
-        ProductDTO producto = productoAPI.findProductByName(request.getProductName());
-        if (producto == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-                    "Product not found with name: " + request.getProductName());
-        }
+        ProductDTO producto = findProductByName(request.getProductName());
 
         ProductItem item = carrito.getProductList().stream()
                 .filter(productItem -> producto.getIdProduct().equals(productItem.getIdProduct()))
@@ -119,6 +109,26 @@ public class CarritoService implements ICarritoService {
 
         recalculate(carrito);
         return Mapper.mapToDTO(carritoRepository.save(carrito));
+    }
+
+    /**
+     * Resuelve un producto por nombre contra el microservicio Producto.
+     *
+     * Producto responde 404 cuando el nombre no existe, y ante un 404 Feign lanza
+     * {@link FeignException.NotFound}: nunca devuelve null. Sin este catch la excepción
+     * sube sin mapear y el cliente recibe un 500 en lugar de un 404.
+     *
+     * TODO: envolver esta llamada con un Circuit Breaker (Resilience4j). Cuando se haga,
+     * el fallback debe ignorar NotFound: un producto inexistente es un error del cliente,
+     * no una caída del servicio.
+     */
+    private ProductDTO findProductByName(String productName) {
+        try {
+            return productoAPI.findProductByName(productName);
+        } catch (FeignException.NotFound e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Product not found with name: " + productName);
+        }
     }
 
     /**

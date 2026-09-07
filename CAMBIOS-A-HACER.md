@@ -16,10 +16,16 @@ Borrar los ítems a medida que se completan.
 | `Ventas` (`ventas-service`) | 8084 (a definir) | **esqueleto vacío**: solo `VentasApplication` y un `application.yaml` con el nombre |
 | API Gateway | 8080 | **no existe** |
 
+> **Para compilar:** los poms piden Java 25, pero el `java` del PATH es el 21. Hay que
+> apuntar `JAVA_HOME` al JDK 25 antes de invocar Maven, si no falla con
+> "release version 25 not supported". En esta máquina:
+> `JAVA_HOME=C:/Users/Facuo/.jdks/temurin-25.0.4.1`
+
 Decisiones ya tomadas para Ventas:
 
 - La venta guarda un **snapshot** de las líneas del carrito (queda inmutable).
 - **No** se maneja stock: `Product` sigue siendo `id / name / brand / unitPrice`.
+- Después de vender, **el carrito no se toca**: `ventas-service` solo lo lee.
 - El Gateway lo implementa Facu por su cuenta (ver bloque C).
 
 ---
@@ -28,7 +34,15 @@ Decisiones ya tomadas para Ventas:
 
 ## A1. Manejar el 404 de Feign en `CarritoService.addProduct`
 
-**Estado:** pendiente
+**Estado:** ✅ HECHO
+
+La llamada Feign se extrajo al método privado `CarritoService.findProductByName(String)`,
+que captura `FeignException.NotFound` y relanza un 404 propio. Se borró el
+`if (producto == null)` (código muerto) y el TODO del circuit breaker quedó anotado sobre
+ese método, que es donde corresponde cuando se retome A2.
+
+<details>
+<summary>Detalle original del problema</summary>
 
 `ProductService.findByName` (microservicio Producto) lanza `ProductNotFoundException`
 mapeada a HTTP 404. Feign, ante un 404, **lanza `FeignException.NotFound`**: no devuelve `null`.
@@ -40,32 +54,43 @@ ProductDTO producto = productoAPI.findProductByName(request.getProductName());
 if (producto == null) { ... }   // nunca se cumple; en su lugar sale un 500
 ```
 
-**Acción (elegir una):**
+**Acción: opción A** (la B dependía del circuit breaker, que quedó postergado — ver A2).
 
-- **A.** Capturar la excepción en el service y relanzar como 404 propio:
+Capturar la excepción en el service y relanzar como 404 propio:
 
-  ```java
-  ProductDTO producto;
-  try {
-      producto = productoAPI.findProductByName(request.getProductName());
-  } catch (FeignException.NotFound e) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND,
-              "Product not found with name: " + request.getProductName());
-  }
-  ```
+```java
+ProductDTO producto;
+try {
+    producto = productoAPI.findProductByName(request.getProductName());
+} catch (FeignException.NotFound e) {
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+            "Product not found with name: " + request.getProductName());
+}
+```
 
-- **B.** Resolverlo con el fallback del Circuit Breaker (ver A2). Si se hace B,
-  el bloque try/catch de A no hace falta.
+Al hacerlo, borrar el `if (producto == null)` que queda debajo: es código muerto.
 
-> Ojo: si se va por B, el fallback **no debe** convertir un 404 en 503. Un producto
-> inexistente es un error del cliente, no una caída del servicio. Lo prolijo es
-> `ignoreExceptions = FeignException.NotFound.class` en el circuit breaker.
+<details>
+<summary>Opción B — descartada por ahora</summary>
+
+Resolverlo con el fallback del Circuit Breaker, sin try/catch. Si más adelante se retoma A2
+y se va por este camino, el fallback **no debe** convertir un 404 en 503: un producto
+inexistente es un error del cliente, no una caída del servicio. Lo prolijo es
+`ignoreExceptions = FeignException.NotFound.class`.
+
+</details>
+
+</details>
 
 ---
 
 ## A2. Circuit Breaker en la llamada Feign (TODO ya marcado en el código)
 
-**Estado:** pendiente
+**Estado:** POSTERGADO — se retoma después de tener Ventas funcionando.
+
+> Si la consigna del ejercicio pide resiliencia / circuit breaker, esto **no se puede
+> saltear para la entrega**: solo se está corriendo de lugar en el orden de trabajo.
+> La dependencia ya está en los tres poms, así que probablemente estaba previsto.
 
 Dependencia ya presente en `Carrito/pom.xml`: `spring-cloud-starter-circuitbreaker-resilience4j`.
 
@@ -75,9 +100,8 @@ Definir el comportamiento del fallback (ej. 503 si Producto está caído, 404 si
 
 Notas:
 
-- Hay **dos** comentarios `// TODO: envolver esta llamada con un Circuit Breaker` en
-  `CarritoService.addProduct`; el primero (arriba de la validación de `quantity`) está
-  fuera de lugar — borrarlo.
+- El punto de enganche ya está aislado: `CarritoService.findProductByName(String)`. El TODO
+  quedó en su javadoc. (El TODO duplicado que estaba fuera de lugar ya se borró en A1.)
 - El `fallbackMethod` tiene que tener **la misma firma** que el método protegido más un
   parámetro `Throwable` al final.
 
@@ -250,7 +274,8 @@ Lógica de `confirmarVenta`:
 4. **Recalcular subtotales y total del lado del servidor**, igual que hace
    `CarritoService.recalculate`. Nunca confiar en el `totalPrice` que llega por HTTP.
 5. `fechaVenta = LocalDateTime.now()`.
-6. Guardar y devolver la `VentaDTO`.
+6. Guardar y devolver la `VentaDTO`. **El carrito no se modifica ni se borra** (ver B9.1):
+   la única llamada saliente del método es el `GET` del paso 1.
 
 `@Transactional` en los métodos de escritura, `@Transactional(readOnly = true)` en las
 lecturas — mismo criterio que `CarritoService`.
@@ -273,7 +298,10 @@ cambio de estado (ver B9), no como `PUT` genérico.
 
 ## B8. Circuit Breaker en `confirmarVenta`
 
-**Estado:** pendiente
+**Estado:** POSTERGADO junto con A2.
+
+Mientras tanto, `confirmarVenta` maneja el `FeignException.NotFound` con try/catch, igual
+que A1. Cuando se retome A2, esto sale casi gratis: mismo patrón, otra llamada.
 
 Mismo tratamiento que A2, pero sobre `carritoAPI.findCarritoById(...)`:
 `@CircuitBreaker(name = "carritoService", fallbackMethod = "...")` con
@@ -284,16 +312,22 @@ con "carrito-service caído".
 
 **Estado:** pendiente de decisión
 
-1. **¿Qué pasa con el carrito después de vender?**
-   - (a) No se toca — el carrito queda igual. Es lo más simple y lo más seguro.
-   - (b) Se borra / se vacía llamando por Feign a `DELETE /carritos/delete/{id}`.
-     Problema clásico de sistemas distribuidos: si la venta ya se guardó y el borrado falla,
-     queda inconsistente. Si se hace, dejar el borrado **después** del `save` y tolerar el
-     fallo (log y seguir), no romper la venta por eso.
-2. **¿Se puede vender dos veces el mismo carrito?** Si no, hace falta un
-   `existsByIdCarrito` en el repositorio y devolver 409 Conflict.
-3. **¿Hace falta un campo `cliente`?** El ejercicio no lo pide y no hay microservicio de
-   usuarios. Si se agrega, que sea un `String` simple, no otra llamada distribuida.
+1. ~~**¿Qué pasa con el carrito después de vender?**~~ **DECIDIDO: no se toca.**
+   `confirmarVenta` solo lee el carrito; no lo borra ni lo vacía. `ventas-service` hace
+   una única llamada distribuida (el `GET`) y no tiene que compensar nada si algo falla:
+   o la venta se guarda entera, o no se guarda. El carrito queda tal cual estaba.
+
+2. **¿Se puede vender dos veces el mismo carrito?** Esta queda más expuesta por la
+   decisión de arriba: como el carrito sobrevive a la venta, nada impide mandar dos veces
+   `POST /ventas/save` con el mismo `idCarrito` y generar dos ventas idénticas.
+   - (a) Permitirlo — es un ejercicio, no hay caja real detrás.
+   - (b) Bloquearlo: `boolean existsByIdCarrito(Long idCarrito)` en `IVentaRepository`,
+     y si ya existe -> 409 Conflict "El carrito N ya fue vendido". Son dos líneas y es la
+     defensa natural para un endpoint no idempotente.
+
+3. ~~**¿Hace falta un campo `cliente`?**~~ **DECIDIDO: no va.** La consigna no lo pide y no
+   hay microservicio de usuarios. `Venta` queda con `idVenta`, `idCarrito`, `fechaVenta`,
+   `items` y `total`, nada más.
 
 ---
 
@@ -328,9 +362,8 @@ A tener en cuenta cuando se arme:
    En MySQL con collation por defecto (`..._ci`) funciona igual porque la comparación ya es
    case-insensitive, pero el código miente sobre lo que hace. Limpiar: o se saca el
    `toLowerCase()`, o se usa `LOWER(name) = :name` en el query.
-2. **`CarritoService`** — imports sin usar (`FeignClient`, `GetMapping`, `PathVariable`) y
-   el TODO duplicado mencionado en A2.
-3. **`ProductoAPI` (Carrito)** — importa `CarritoDTO` y no lo usa.
+2. ~~**`CarritoService`** — imports sin usar y TODO duplicado.~~ ✅ hecho junto con A1.
+3. ~~**`ProductoAPI` (Carrito)** — importa `CarritoDTO` y no lo usa.~~ ✅ hecho junto con A1.
 4. **`config-data`** — solo tiene `eureka-server.yaml`. Si la idea es que el config-server
    sirva de verdad la configuración, faltan `producto-service.yaml`, `carrito-service.yaml`
    y `ventas-service.yaml` ahí, y que cada microservicio los consuma
@@ -343,11 +376,15 @@ A tener en cuenta cuando se arme:
 
 # Orden sugerido
 
-1. A1 + A2 — cerrar Carrito. Es poco código y deja probado el patrón Feign + Circuit Breaker
-   que después se replica igual en Ventas.
+1. ~~A1 — el try/catch del 404 en Carrito.~~ ✅ hecho.
 2. B1 — config de Ventas; verificar que levanta y se registra en Eureka antes de escribir
    una sola clase de dominio.
-3. B9 (decidir) y después B2 -> B3 -> B4 -> B5 -> B6 -> B7: Ventas de punta a punta.
-4. B8 — circuit breaker en Ventas, replicando lo de A2.
-5. C — gateway.
+3. B2 -> B3 -> B4 -> B5 -> B6 -> B7: Ventas de punta a punta.
+4. C — gateway.
+5. **A2 + B8 — circuit breaker en los dos servicios, de una sola vez.** Postergados a
+   propósito: se hacen juntos cuando las llamadas Feign ya estén andando y probadas, así
+   se agrega resiliencia sobre algo que funciona en vez de debuggear las dos cosas a la vez.
 6. D — limpiezas, antes de la entrega.
+
+Decisiones que quedan abiertas y no bloquean nada: B9.2 (bloquear venta duplicada del mismo
+carrito) se resuelve al escribir B6.
